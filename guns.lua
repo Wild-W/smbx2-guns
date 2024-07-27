@@ -1,6 +1,7 @@
 local guns = {}
 
 guns.members = {}
+guns.bullets = {}
 
 guns.defaultcam1 = true
 
@@ -32,13 +33,7 @@ local function unequip(gun)
     Misc.setCursor(false)
 end
 
-local function shoot(gun)
-    if gun.firingSound ~= nil then
-        SFX.play(gun.firingSound)
-    end
-
-    Defines.earthquake = Defines.earthquake + gun.screenshake
-
+local function recoil(gun)
     local aimAngle = math.atan2(guns.cursorY - gun.player.y, guns.cursorX - gun.player.x)
 
     -- Calculate recoil relative to rotation
@@ -58,12 +53,39 @@ local function shoot(gun)
     gun.currentRecoilRotation = math.clamp(gun.currentRecoilRotation + adjustedRecoilRotation, 0, gun.maxRecoilRotation)
 end
 
+local function fireRaycast(gun)
+    local aimAngle = math.atan2(guns.cursorY - gun.player.y, guns.cursorX - gun.player.x)
+
+    local bulletStart = vector(gun.player.x + gun.player.width*0.5, gun.player.y + gun.player.height*0.5)
+    local bulletDirection = vector(math.cos(aimAngle), -math.sin(aimAngle))
+
+    local bullet = guns.newBullet {
+        start = bulletStart,
+        direction = bulletDirection,
+        colliders = Block.get()
+    }
+
+    bullet:fire()
+end
+
+local function shoot(gun)
+    if gun.firingSound ~= nil then
+        SFX.play(gun.firingSound)
+    end
+
+    Defines.earthquake = Defines.earthquake + gun.screenshake
+    gun:recoil()
+    gun:fireRaycast()
+end
+
 local gunMT = {
     __index = {
         attach = attach,
         equip = equip,
         unequip = unequip,
         shoot = shoot,
+        recoil = recoil,
+        fireRaycast = fireRaycast
     }
 }
 
@@ -102,6 +124,49 @@ function guns.newGun(params)
 
     guns.members[newId] = gun
     return gun
+end
+
+local function destroy(bullet)
+    guns.bullets[bullet.id] = nil
+end
+
+local function fire(bullet)
+    local isColliding, intersection = Colliders.raycast(bullet.start, bullet.direction, bullet.colliders)
+    if isColliding then
+        bullet.stop = intersection
+    else
+        bullet.stop = bullet.start * 5
+    end
+
+    bullet.fired = true
+end
+
+local bulletMT = {
+    __index = {
+        fire = fire,
+        destroy = destroy
+    }
+}
+
+local bulletId = 0
+function guns.newBullet(params)
+    local newId = bulletId
+    bulletId = bulletId + 1
+
+    local bullet = {
+        id = newId,
+        fired = false,
+
+        start = params.start,
+        direction = params.direction,
+        colliders = params.colliders,
+
+        linger = params.linger or 65
+    }
+    setmetatable(bullet, bulletMT)
+
+    guns.bullets[newId] = bullet
+    return bullet
 end
 
 local function getCursorScenePosition()
@@ -158,6 +223,19 @@ function guns.onDraw()
 
         ::continue::
     end
+
+    for _, bullet in pairs(guns.bullets) do
+        if not bullet.fired then goto continue end
+
+        Graphics.drawLine {
+            start = bullet.start,
+            stop = bullet.stop,
+            color = Color.yellow,
+            sceneCoords = true,
+        }
+
+        ::continue::
+    end
 end
 
 function guns.onTick()
@@ -176,6 +254,17 @@ function guns.onTick()
             0, gun.maxRecoilRotation)
 
         gun.player.direction = gun.direction
+
+        ::continue::
+    end
+
+    for _, bullet in pairs(guns.bullets) do
+        if not bullet.fired then goto continue end
+
+        bullet.linger = bullet.linger - 1
+        if bullet.linger <= 0 then
+            bullet:destroy()
+        end
 
         ::continue::
     end
