@@ -2,6 +2,7 @@ return {
     crosshair = "guns/blick_crosshair.png",
     body = "guns/blick_body.png",
     firingSound = "guns/blick.mp3",
+    muzzleFlashTexture = "guns/blick_flash.png",
     bodyOffsetX = -3,
     bodyOffsetY = -0,
     screenshake = 2,
@@ -14,6 +15,6 @@ return {
     maxRecoilX = 20,
     maxRecoilY = 0,
     maxRecoilRotation = 1,
-    bulletOffsetX = -10,
-    bulletOffsetY = 3
+    bulletOffsetX = 32,
+    bulletOffsetY = 10
 }

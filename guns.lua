@@ -1,19 +1,11 @@
+local memoize = require "memoize"
+
 local guns = {}
 
 guns.members = {}
 guns.bullets = {}
 
 guns.defaultcam1 = true
-
-local function tmemoize(func)
-    return setmetatable({}, {
-        __index = function(self, k)
-            local v = func(k)
-            self[k] = v
-            return v
-        end
-    })
-end
 
 local function attach(gun, pl)
     if gun.attached then return end
@@ -54,15 +46,12 @@ local function recoil(gun)
 end
 
 local function fireRaycast(gun)
-    local aimAngle = math.atan2(guns.cursorY - gun.player.y, guns.cursorX - gun.player.x)
-
     local bulletStart = vector(gun.player.x + gun.player.width*0.5, gun.player.y + gun.player.height*0.5)
-    local bulletDirection = vector(math.cos(aimAngle), -math.sin(aimAngle))
+    local bulletDirection = vector(math.cos(gun.angle), -math.sin(gun.angle))
 
     local bullet = guns.newBullet {
         start = bulletStart,
-        direction = bulletDirection,
-        colliders = Block.get()
+        direction = bulletDirection
     }
 
     bullet:fire()
@@ -72,6 +61,8 @@ local function shoot(gun)
     if gun.firingSound ~= nil then
         SFX.play(gun.firingSound)
     end
+
+    gun.currentFlash = 1
 
     Defines.earthquake = Defines.earthquake + gun.screenshake
     gun:recoil()
@@ -98,10 +89,14 @@ function guns.newGun(params)
         currentRecoilY = 0,
         currentRecoilRotation = 0,
         equipped = false,
+        currentFlash = 0,
 
         crosshairTexture = Graphics.loadImageResolved(params.crosshair),
         bodyTexture = Graphics.loadImageResolved(params.body),
+        muzzleFlashTexture = Graphics.loadImageResolved(params.muzzleFlashTexture),
         firingSound = params.firingSound,
+        --muzzleFlash = (params.muzzleFlash ~= nil)
+            --and Shader.fromFile(params.muzzleFlash..".vert", params.muzzleFlash..".frag") or nil,
 
         bodyOffsetX = params.bodyOffsetX or 0,
         bodyOffsetY = params.bodyOffsetY or 0,
@@ -131,12 +126,7 @@ local function destroy(bullet)
 end
 
 local function fire(bullet)
-    local isColliding, intersection = Colliders.raycast(bullet.start, bullet.direction, bullet.colliders)
-    if isColliding then
-        bullet.stop = intersection
-    else
-        bullet.stop = bullet.start * 5
-    end
+    
 
     bullet.fired = true
 end
@@ -192,32 +182,44 @@ local function getCursorScenePosition()
     return sceneX, sceneY
 end
 
+local getIsoTriangleVertices = memoize(function (centerX, centerY, baseLength, height, isPointingUpwards)
+    local x_c, y_c = centerX, centerY
+    local halfBase = baseLength / 2
+    local apexY = isPointingUpwards and (y_c + height) or (y_c - height)
+    return {
+        x_c - halfBase, y_c,
+        x_c + halfBase, y_c,
+        x_c, apexY
+    }
+end)
+
 function guns.onDraw()
     for _, gun in ipairs(guns.members) do
         if gun.player == nil or not gun.equipped then goto continue end
 
-        local pivotX = gun.player.x + gun.player.width * 0.5 + gun.direction + gun.bodyOffsetX * gun.direction
-        local pivotY = gun.player.y + gun.player.height * 0.5 - gun.direction + gun.bodyOffsetY * gun.direction
-
-        local dx = guns.cursorX - pivotX
-        local dy = guns.cursorY - pivotY
-        local distance = math.sqrt(dx * dx + dy * dy)
-        local angle = math.atan2(dy, dx)
-
-        local clampedDistance = math.clamp(distance, 0, 30)
-
-        local clampedX = clampedDistance * math.cos(angle)
-        local clampedY = clampedDistance * math.sin(angle)
-
         Graphics.drawBox {
             type = RTYPE_IMAGE,
             texture = gun.bodyTexture,
-            x = pivotX + clampedX - gun.currentRecoilX * gun.direction,
-            y = pivotY + clampedY - gun.currentRecoilY,
+            x = gun.totalX,
+            y = gun.totalY,
             priority = -20,
-            rotation = (gun.currentRotation - gun.currentRecoilRotation * gun.direction) * 180 / math.pi,
+            rotation = gun.currentTotalRotation,
             sceneCoords = true,
             height = gun.bodyTexture.height * gun.direction,
+            centered = true
+        }
+
+        if gun.currentFlash == 0 then goto continue end
+
+        Graphics.drawBox {
+            type = RTYPE_IMAGE,
+            texture = gun.muzzleFlashTexture,
+            x = gun.totalX,
+            y = gun.totalY,
+            priority = -19,
+            rotation = gun.currentTotalRotation,
+            sceneCoords = true,
+            height = gun.muzzleFlashTexture.height * gun.direction,
             centered = true
         }
 
@@ -226,13 +228,6 @@ function guns.onDraw()
 
     for _, bullet in pairs(guns.bullets) do
         if not bullet.fired then goto continue end
-
-        Graphics.drawLine {
-            start = bullet.start,
-            stop = bullet.stop,
-            color = Color.yellow,
-            sceneCoords = true,
-        }
 
         ::continue::
     end
@@ -255,6 +250,25 @@ function guns.onTick()
 
         gun.player.direction = gun.direction
 
+        gun.pivotX = gun.player.x + gun.player.width * 0.5 + gun.direction + gun.bodyOffsetX * gun.direction
+        gun.pivotY = gun.player.y + gun.player.height * 0.5 - gun.direction + gun.bodyOffsetY * gun.direction
+
+        local dx = guns.cursorX - gun.pivotX
+        local dy = guns.cursorY - gun.pivotY
+        local distance = math.sqrt(dx * dx + dy * dy)
+        gun.angle = math.atan2(dy, dx)
+
+        local clampedDistance = math.clamp(distance, 0, 30)
+
+        local clampedX = clampedDistance * math.cos(gun.angle)
+        local clampedY = clampedDistance * math.sin(gun.angle)
+
+        gun.currentTotalRotation = (gun.currentRotation - gun.currentRecoilRotation * gun.direction) * 180 / math.pi
+        gun.totalX = gun.pivotX + clampedX - gun.currentRecoilX * gun.direction
+        gun.totalY = gun.pivotY + clampedY - gun.currentRecoilY
+
+        gun.currentFlash = math.max(0, gun.currentFlash * 0.5 - 1/65)
+
         ::continue::
     end
 
@@ -272,7 +286,7 @@ end
 
 function guns.onMouseButtonEvent(mouseButton, state)
     for _, gun in ipairs(guns.members) do
-        if gun.player == nil or not gun.equipped then goto continue end
+        if gun.player == nil or not gun.equipped or Misc.isPaused() then goto continue end
 
         if mouseButton == 0 and state == KEYS_PRESSED then
             gun:shoot()
