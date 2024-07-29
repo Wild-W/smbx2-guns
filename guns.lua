@@ -240,11 +240,13 @@ function guns.onDraw()
 
         if gun.currentFlash == 0 then goto continue end
 
+        local angle = gun.currentTotalRotation * math.pi / 180
+
         Graphics.drawBox {
             type = RTYPE_IMAGE,
             texture = gun.muzzleFlashTexture,
-            x = gun.totalX + gun.bulletOffsetX * gun.direction,
-            y = gun.totalY + gun.bulletOffsetY * gun.direction,
+            x = gun.totalX + gun.bulletOffsetX * math.cos(angle) - gun.bulletOffsetY * -gun.direction * math.sin(angle),
+            y = gun.totalY + gun.bulletOffsetX * math.sin(angle) + gun.bulletOffsetY * -gun.direction * math.cos(angle),
             priority = -19,
             rotation = gun.currentTotalRotation,
             sceneCoords = true,
@@ -324,13 +326,13 @@ end
 
 function guns.onMouseButtonEvent(mouseButton, state)
     for _, gun in ipairs(guns.members) do
-        if gun.player == nil or not gun.equipped or Misc.isPaused() or gun.ammo == 0 then goto continue end
+        if gun.player == nil or not gun.equipped or Misc.isPaused() or gun.currentReloadTime > 0 then goto continue end
 
         if state == KEYS_PRESSED then
             if mouseButton == 0 then
                 gun:shoot()
             elseif mouseButton == 1 then
-                if gun.ammoCapacity == -1 or gun.autoReload then goto continue end
+                if gun.ammoCapacity == -1 or gun.ammo == gun.ammoCapacity then goto continue end
                 gun:reload()
             end
         end
