@@ -1,4 +1,5 @@
 local memoize = require "memoize"
+local textplus = require "textplus"
 
 local guns = {}
 
@@ -62,11 +63,24 @@ local function shoot(gun)
         SFX.play(gun.firingSound)
     end
 
+    if gun.ammo ~= -1 then
+        gun.ammo = gun.ammo - 1
+    end
+
     gun.currentFlash = 1
 
     Defines.earthquake = Defines.earthquake + gun.screenshake
     gun:recoil()
     gun:fireRaycast()
+end
+
+local function reload(gun, amount)
+    if gun.reloadSound ~= nil then
+        SFX.play(gun.reloadSound)
+    end
+
+    gun.currentReloadTime = gun.reloadTime
+    gun.nextReloadAmount = amount or gun.ammoCapacity
 end
 
 local gunMT = {
@@ -76,7 +90,8 @@ local gunMT = {
         unequip = unequip,
         shoot = shoot,
         recoil = recoil,
-        fireRaycast = fireRaycast
+        fireRaycast = fireRaycast,
+        reload = reload,
     }
 }
 
@@ -90,14 +105,21 @@ function guns.newGun(params)
         currentRecoilRotation = 0,
         equipped = false,
         currentFlash = 0,
+        currentReloadTime = 0,
+        ammo = params.ammoCapacity or -1,
 
         crosshairTexture = Graphics.loadImageResolved(params.crosshair),
         bodyTexture = Graphics.loadImageResolved(params.body),
         muzzleFlashTexture = Graphics.loadImageResolved(params.muzzleFlashTexture),
         firingSound = params.firingSound,
+        reloadSound = params.reloadSound,
+        reloadTexture = Graphics.loadImageResolved(params.reloadTexture),
         --muzzleFlash = (params.muzzleFlash ~= nil)
             --and Shader.fromFile(params.muzzleFlash..".vert", params.muzzleFlash..".frag") or nil,
 
+        autoReload = params.autoReload or false,
+        reloadTime = params.reloadTime or 0,
+        ammoCapacity = params.ammoCapacity or -1,
         bodyOffsetX = params.bodyOffsetX or 0,
         bodyOffsetY = params.bodyOffsetY or 0,
         crosshairOffsetX = params.crosshairOffsetX or 0,
@@ -195,11 +217,18 @@ end)
 
 function guns.onDraw()
     for _, gun in ipairs(guns.members) do
+
+        textplus.print {
+            x = 0,
+            y = 0,
+            text = "<size 10>" .. tostring(gun.ammo).."/"..tostring(gun.ammoCapacity) .. "</size>"
+        }
+
         if gun.player == nil or not gun.equipped then goto continue end
 
         Graphics.drawBox {
             type = RTYPE_IMAGE,
-            texture = gun.bodyTexture,
+            texture = (gun.currentReloadTime == 0 and gun.reloadTexture ~= nil) and gun.bodyTexture or gun.reloadTexture,
             x = gun.totalX,
             y = gun.totalY,
             priority = -20,
@@ -214,8 +243,8 @@ function guns.onDraw()
         Graphics.drawBox {
             type = RTYPE_IMAGE,
             texture = gun.muzzleFlashTexture,
-            x = gun.totalX,
-            y = gun.totalY,
+            x = gun.totalX + gun.bulletOffsetX * gun.direction,
+            y = gun.totalY + gun.bulletOffsetY * gun.direction,
             priority = -19,
             rotation = gun.currentTotalRotation,
             sceneCoords = true,
@@ -269,6 +298,15 @@ function guns.onTick()
 
         gun.currentFlash = math.max(0, gun.currentFlash * 0.5 - 1/65)
 
+        if gun.currentReloadTime == 1 then
+            gun.ammo = gun.nextReloadAmount
+        end
+        gun.currentReloadTime = math.max(0, gun.currentReloadTime - 1)
+
+        if gun.ammo == 0 and gun.autoReload and gun.currentReloadTime == 0 then
+            gun:reload()
+        end
+
         ::continue::
     end
 
@@ -286,10 +324,15 @@ end
 
 function guns.onMouseButtonEvent(mouseButton, state)
     for _, gun in ipairs(guns.members) do
-        if gun.player == nil or not gun.equipped or Misc.isPaused() then goto continue end
+        if gun.player == nil or not gun.equipped or Misc.isPaused() or gun.ammo == 0 then goto continue end
 
-        if mouseButton == 0 and state == KEYS_PRESSED then
-            gun:shoot()
+        if state == KEYS_PRESSED then
+            if mouseButton == 0 then
+                gun:shoot()
+            elseif mouseButton == 1 then
+                if gun.ammoCapacity == -1 or gun.autoReload then goto continue end
+                gun:reload()
+            end
         end
 
         ::continue::

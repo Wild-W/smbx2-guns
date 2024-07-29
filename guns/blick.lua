@@ -3,6 +3,8 @@ return {
     body = "guns/blick_body.png",
     firingSound = "guns/blick.mp3",
     muzzleFlashTexture = "guns/blick_flash.png",
+    reloadSound = "guns/blick_reload.mp3",
+    reloadTexture = "guns/blick_reload.png",
     bodyOffsetX = -3,
     bodyOffsetY = -0,
     screenshake = 2,
@@ -16,5 +18,8 @@ return {
     maxRecoilY = 0,
     maxRecoilRotation = 1,
     bulletOffsetX = 32,
-    bulletOffsetY = 10
+    bulletOffsetY = 10,
+    ammoCapacity = 16,
+    reloadTime = 65,
+    autoReload = true,
 }
