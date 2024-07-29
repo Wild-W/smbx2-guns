@@ -27,6 +27,8 @@ local function unequip(gun)
 end
 
 local function recoil(gun)
+    gun.recoilTime = gun.recoilTime + 1
+
     local aimAngle = math.atan2(guns.cursorY - gun.player.y, guns.cursorX - gun.player.x)
 
     -- Calculate recoil relative to rotation
@@ -43,7 +45,19 @@ local function recoil(gun)
         and gun.recoilRotation * (1 + verticalComponent)
         or gun.recoilRotation
 
-    gun.currentRecoilRotation = math.clamp(gun.currentRecoilRotation + adjustedRecoilRotation, 0, gun.maxRecoilRotation)
+    local totalRecoil
+    if gun.recoilAmplitude == 0 then
+        totalRecoil = adjustedRecoilRotation
+    else
+        local sineWaveRecoil = gun.recoilAmplitude * math.sin(gun.recoilTime * gun.recoilFrequency)
+        totalRecoil = (adjustedRecoilRotation + sineWaveRecoil) * (1 - 0.1 * gun.stabilityRate)
+    end
+
+    gun.currentRecoilRotation = math.clamp(
+        gun.currentRecoilRotation + totalRecoil,
+        -gun.maxRecoilRotation,
+        gun.maxRecoilRotation
+    ) * 0.95
 end
 
 local function fireRaycast(gun)
@@ -67,11 +81,14 @@ local function shoot(gun)
         gun.ammo = gun.ammo - 1
     end
 
+    if gun.fireRate ~= -1 then
+        gun.timeTillNextFire = gun.fireRate
+    end
+
     gun.currentFlash = 1
 
     Defines.earthquake = Defines.earthquake + gun.screenshake
     gun:recoil()
-    gun:fireRaycast()
 end
 
 local function reload(gun, amount)
@@ -107,16 +124,20 @@ function guns.newGun(params)
         currentFlash = 0,
         currentReloadTime = 0,
         ammo = params.ammoCapacity or -1,
+        timeTillNextFire = 0,
+        recoilTime = 0,
 
         crosshairTexture = Graphics.loadImageResolved(params.crosshair),
         bodyTexture = Graphics.loadImageResolved(params.body),
         muzzleFlashTexture = Graphics.loadImageResolved(params.muzzleFlashTexture),
         firingSound = params.firingSound,
         reloadSound = params.reloadSound,
-        reloadTexture = Graphics.loadImageResolved(params.reloadTexture),
+        reloadTexture = (params.reloadTexture ~= nil) and Graphics.loadImageResolved(params.reloadTexture) or nil,
         --muzzleFlash = (params.muzzleFlash ~= nil)
             --and Shader.fromFile(params.muzzleFlash..".vert", params.muzzleFlash..".frag") or nil,
 
+        fireRate = params.fireRate or -1,
+        automatic = params.automatic or false,
         autoReload = params.autoReload or false,
         reloadTime = params.reloadTime or 0,
         ammoCapacity = params.ammoCapacity or -1,
@@ -136,6 +157,9 @@ function guns.newGun(params)
         maxRecoilY = params.maxRecoilY or 0,
         bulletOffsetX = params.bulletOffsetX or 0,
         bulletOffsetY = params.bulletOffsetY or 0,
+        recoilAmplitude = params.recoilAmplitude or 0,
+        recoilFrequency = params.recoilFrequency or 0,
+        stabilityRate = params.stabilityRate or 1
     }
     setmetatable(gun, gunMT)
 
@@ -205,30 +229,36 @@ local function getCursorScenePosition()
 end
 
 local getIsoTriangleVertices = memoize(function (centerX, centerY, baseLength, height, isPointingUpwards)
-    local x_c, y_c = centerX, centerY
     local halfBase = baseLength / 2
-    local apexY = isPointingUpwards and (y_c + height) or (y_c - height)
+    local apexY = isPointingUpwards and (centerY + height) or (centerY - height)
     return {
-        x_c - halfBase, y_c,
-        x_c + halfBase, y_c,
-        x_c, apexY
+        centerX - halfBase, centerY,
+        centerX + halfBase, centerY,
+        centerX, apexY
     }
 end)
 
 function guns.onDraw()
-    for _, gun in ipairs(guns.members) do
+    for id, gun in ipairs(guns.members) do
 
         textplus.print {
             x = 0,
-            y = 0,
-            text = "<size 10>" .. tostring(gun.ammo).."/"..tostring(gun.ammoCapacity) .. "</size>"
+            y = (id-1)*70,
+            text = "<size 7>" .. tostring(gun.ammo).."/"..tostring(gun.ammoCapacity) .. "</size>"
         }
 
         if gun.player == nil or not gun.equipped then goto continue end
 
+        local bodyTexture
+        if gun.currentReloadTime == 0 or gun.reloadTexture == nil then
+            bodyTexture = gun.bodyTexture
+        else
+            bodyTexture = gun.reloadTexture
+        end
+
         Graphics.drawBox {
             type = RTYPE_IMAGE,
-            texture = (gun.currentReloadTime == 0 and gun.reloadTexture ~= nil) and gun.bodyTexture or gun.reloadTexture,
+            texture = bodyTexture,
             x = gun.totalX,
             y = gun.totalY,
             priority = -20,
@@ -275,14 +305,17 @@ function guns.onTick()
 
         gun.currentRecoilX = math.clamp(gun.currentRecoilX - gun.recoilX * gun.recoilXDecay, 0, gun.maxRecoilX)
         gun.currentRecoilY = math.clamp(gun.currentRecoilY - gun.recoilY * gun.recoilYDecay, 0, gun.maxRecoilY)
-        gun.currentRecoilRotation = math.clamp(
-            gun.currentRecoilRotation - gun.recoilRotation * gun.recoilRotationDecay,
-            0, gun.maxRecoilRotation)
+
+        if gun.currentRecoilRotation > 0 then
+            gun.currentRecoilRotation = math.max(0, gun.currentRecoilRotation - gun.recoilRotation * gun.recoilRotationDecay)
+        elseif gun.currentRecoilRotation < 0 then
+            gun.currentRecoilRotation = math.min(0, gun.currentRecoilRotation + gun.recoilRotation * gun.recoilRotationDecay)
+        end
 
         gun.player.direction = gun.direction
 
         gun.pivotX = gun.player.x + gun.player.width * 0.5 + gun.direction + gun.bodyOffsetX * gun.direction
-        gun.pivotY = gun.player.y + gun.player.height * 0.5 - gun.direction + gun.bodyOffsetY * gun.direction
+        gun.pivotY = gun.player.y + gun.player.height * 0.5 - gun.direction + gun.bodyOffsetY
 
         local dx = guns.cursorX - gun.pivotX
         local dy = guns.cursorY - gun.pivotY
@@ -309,6 +342,16 @@ function guns.onTick()
             gun:reload()
         end
 
+        gun.timeTillNextFire = math.max(0, gun.timeTillNextFire - 1)
+
+        if mem(0x00B2D6CC, FIELD_BOOL) then
+            if gun.automatic and gun.timeTillNextFire == 0 and gun.ammo ~= 0 and gun.currentReloadTime == 0 then
+                gun:shoot()
+            end
+        else
+            gun.recoilTime = math.max(0, gun.recoilTime - gun.stabilityRate)
+        end
+
         ::continue::
     end
 
@@ -330,6 +373,7 @@ function guns.onMouseButtonEvent(mouseButton, state)
 
         if state == KEYS_PRESSED then
             if mouseButton == 0 then
+                if gun.timeTillNextFire > 0 or gun.ammo == 0 then goto continue end
                 gun:shoot()
             elseif mouseButton == 1 then
                 if gun.ammoCapacity == -1 or gun.ammo == gun.ammoCapacity then goto continue end

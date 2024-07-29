@@ -22,4 +22,6 @@ return {
     ammoCapacity = 16,
     reloadTime = 65,
     autoReload = true,
+    fireRate = -1,
+    automatic = false,
 }
