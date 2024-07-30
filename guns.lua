@@ -307,40 +307,40 @@ end
 
 function guns.onTickBullet(npc)
     if npc:mem(0x12C, FIELD_WORD) > 0 --Grabbed
-	or npc:mem(0x136, FIELD_BOOL)     --Thrown
-	or npc:mem(0x138, FIELD_WORD) > 0 --Contained within
-	then
-		return
-	end
+    or npc:mem(0x136, FIELD_BOOL)     --Thrown
+    or npc:mem(0x138, FIELD_WORD) > 0 --Contained within
+    then
+        return
+    end
 
-	local didSomething = false
+    local didSomething = false
 
-	for _, otherNpc in ipairs(Colliders.getColliding{a = npc, b = NPC.HITTABLE, btype = Colliders.NPC}) do
-		if otherNpc.id ~= otherNpc.id and otherNpc:mem(0x138, FIELD_WORD) == 0 and otherNpc:mem(0x12C, FIELD_WORD) == 0 then
-			otherNpc:harm(HARM_TYPE_NPC)
-			didSomething = true
-		end
-	end
+    for _, otherNpc in ipairs(Colliders.getColliding{a = npc, b = NPC.HITTABLE, btype = Colliders.NPC}) do
+        if otherNpc.id ~= otherNpc.id and otherNpc:mem(0x138, FIELD_WORD) == 0 and otherNpc:mem(0x12C, FIELD_WORD) == 0 then
+            otherNpc:harm(HARM_TYPE_NPC)
+            didSomething = true
+        end
+    end
 
-	for _, block in ipairs(Colliders.getColliding{a = npc, b = Block.SOLID, btype = Colliders.BLOCK}) do
-		if block.contentID == 0 and Block.MEGA_SMASH_MAP[block.id] then
-			block:remove(true)
-		else
-			SFX.play(3)
-			block:hit()
-		end
+    for _, block in ipairs(Colliders.getColliding{a = npc, b = Block.SOLID, btype = Colliders.BLOCK}) do
+        if block.contentID == 0 and Block.MEGA_SMASH_MAP[block.id] then
+            block:remove(true)
+        else
+            SFX.play(3)
+            block:hit()
+        end
 
-		didSomething = true
-	end
+        didSomething = true
+    end
 
-	if didSomething then
-		npc:kill(HARM_TYPE_OFFSCREEN)
-	end
+    if didSomething then
+        npc:kill(HARM_TYPE_OFFSCREEN)
+    end
 end
 
 function guns.onDrawBullet(npc)
     local config = NPC.config[npc.id]
-	local img = Graphics.sprites.npc[npc.id].img
+    local img = Graphics.sprites.npc[npc.id].img
 
     Graphics.drawBox {
         texture = img,
@@ -354,7 +354,7 @@ function guns.onDrawBullet(npc)
         rotation = npc.data.rotation * 180 / math.pi
     }
 
-	npcutils.hideNPC(npc)
+    npcutils.hideNPC(npc)
 end
 
 function guns.onTick()
