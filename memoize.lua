@@ -1,22 +1,20 @@
 local function cache_get(cache, params)
-    local node = cache
     for i = 1, #params do
-        node = node.children and node.children[params[i]]
-        if not node then return nil end
+        cache = cache.children and cache.children[params[i]]
+        if not cache then return nil end
     end
-    return node.results
+    return cache.results
 end
 
 local function cache_put(cache, params, results)
-    local node = cache
     local param
     for i = 1, #params do
         param = params[i]
-        node.children = node.children or {}
-        node.children[param] = node.children[param] or {}
-        node = node.children[param]
+        cache.children = cache.children or {}
+        cache.children[param] = cache.children[param] or {}
+        cache = cache.children[param]
     end
-    node.results = results
+    cache.results = results
 end
 
 local function memoize(f)

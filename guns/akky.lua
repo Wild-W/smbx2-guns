@@ -4,7 +4,7 @@ return {
     firingSound = "guns/akky.mp3",
     muzzleFlashTexture = "guns/blick_flash.png",
     reloadSound = "guns/akky_reload.mp3",
-    --reloadTexture = "guns/blick_reload.png",
+    reloadTexture = "guns/akky_reload.png",
     bodyOffsetX = -7,
     bodyOffsetY = 15,
     screenshake = 2,
@@ -27,4 +27,6 @@ return {
     recoilAmplitude = 0.3,
     recoilFrequency = 0.6,
     stabilityRate = 2,
+    bullet = require "guns.cappa",
+    shootSpeed = 30
 }

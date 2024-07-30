@@ -24,4 +24,6 @@ return {
     autoReload = true,
     fireRate = -1,
     automatic = false,
+    bullet = require "guns.cappa",
+    shootSpeed = 20
 }

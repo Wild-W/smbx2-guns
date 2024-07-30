@@ -1,5 +1,7 @@
 local memoize = require "memoize"
 local textplus = require "textplus"
+local npcutils = require "npcs.npcutils"
+local npcManager = require "npcManager"
 
 local guns = {}
 
@@ -60,13 +62,15 @@ local function recoil(gun)
     ) * 0.95
 end
 
-local function fireRaycast(gun)
-    local bulletStart = vector(gun.player.x + gun.player.width*0.5, gun.player.y + gun.player.height*0.5)
-    local bulletDirection = vector(math.cos(gun.angle), -math.sin(gun.angle))
-
+local function fireBullet(gun, angle)
     local bullet = guns.newBullet {
-        start = bulletStart,
-        direction = bulletDirection
+        startX = gun.shootX,
+        startY = gun.shootY,
+        angle = angle,
+        npcId = gun.bullet.npc,
+        speed = gun.shootSpeed + gun.bullet.speed,
+        section = gun.player.section,
+        direction = gun.direction,
     }
 
     bullet:fire()
@@ -88,6 +92,7 @@ local function shoot(gun)
     gun.currentFlash = 1
 
     Defines.earthquake = Defines.earthquake + gun.screenshake
+    gun:fireBullet(gun.currentTotalRotation * math.pi / 180)
     gun:recoil()
 end
 
@@ -107,7 +112,7 @@ local gunMT = {
         unequip = unequip,
         shoot = shoot,
         recoil = recoil,
-        fireRaycast = fireRaycast,
+        fireBullet = fireBullet,
         reload = reload,
     }
 }
@@ -133,6 +138,8 @@ function guns.newGun(params)
         firingSound = params.firingSound,
         reloadSound = params.reloadSound,
         reloadTexture = (params.reloadTexture ~= nil) and Graphics.loadImageResolved(params.reloadTexture) or nil,
+        bullet = params.bullet,
+        shootSpeed = params.shootSpeed,
         --muzzleFlash = (params.muzzleFlash ~= nil)
             --and Shader.fromFile(params.muzzleFlash..".vert", params.muzzleFlash..".frag") or nil,
 
@@ -172,8 +179,13 @@ local function destroy(bullet)
 end
 
 local function fire(bullet)
-    
+    print(bullet)
+    local projectile = NPC.spawn(bullet.npcId, bullet.startX, bullet.startY, bullet.section, false, true)
+    projectile.speedX = bullet.speed * math.cos(bullet.angle)
+    projectile.speedY = bullet.speed * math.sin(bullet.angle)
+    projectile.data.rotation = bullet.angle
 
+    bullet.npc = projectile
     bullet.fired = true
 end
 
@@ -194,15 +206,22 @@ function guns.newBullet(params)
         fired = false,
 
         start = params.start,
-        direction = params.direction,
-        colliders = params.colliders,
-
-        linger = params.linger or 65
+        angle = params.angle,
+        npcId = params.npcId,
+        speed = params.speed,
+        section = params.section,
+        startX = params.startX,
+        startY = params.startY
     }
     setmetatable(bullet, bulletMT)
 
     guns.bullets[newId] = bullet
     return bullet
+end
+
+function guns.registerBulletNPC(npcId)
+    npcManager.registerEvent(npcId, guns, "onDrawNPC", "onDrawBullet")
+    npcManager.registerEvent(npcId, guns, "onTickNPC", "onTickBullet")
 end
 
 local function getCursorScenePosition()
@@ -270,13 +289,11 @@ function guns.onDraw()
 
         if gun.currentFlash == 0 then goto continue end
 
-        local angle = gun.currentTotalRotation * math.pi / 180
-
         Graphics.drawBox {
             type = RTYPE_IMAGE,
             texture = gun.muzzleFlashTexture,
-            x = gun.totalX + gun.bulletOffsetX * math.cos(angle) - gun.bulletOffsetY * -gun.direction * math.sin(angle),
-            y = gun.totalY + gun.bulletOffsetX * math.sin(angle) + gun.bulletOffsetY * -gun.direction * math.cos(angle),
+            x = gun.shootX,
+            y = gun.shootY,
             priority = -19,
             rotation = gun.currentTotalRotation,
             sceneCoords = true,
@@ -286,12 +303,58 @@ function guns.onDraw()
 
         ::continue::
     end
+end
 
-    for _, bullet in pairs(guns.bullets) do
-        if not bullet.fired then goto continue end
+function guns.onTickBullet(npc)
+    if npc:mem(0x12C, FIELD_WORD) > 0 --Grabbed
+	or npc:mem(0x136, FIELD_BOOL)     --Thrown
+	or npc:mem(0x138, FIELD_WORD) > 0 --Contained within
+	then
+		return
+	end
 
-        ::continue::
-    end
+	local didSomething = false
+
+	for _, otherNpc in ipairs(Colliders.getColliding{a = npc, b = NPC.HITTABLE, btype = Colliders.NPC}) do
+		if otherNpc.id ~= otherNpc.id and otherNpc:mem(0x138, FIELD_WORD) == 0 and otherNpc:mem(0x12C, FIELD_WORD) == 0 then
+			otherNpc:harm(HARM_TYPE_NPC)
+			didSomething = true
+		end
+	end
+
+	for _, block in ipairs(Colliders.getColliding{a = npc, b = Block.SOLID, btype = Colliders.BLOCK}) do
+		if block.contentID == 0 and Block.MEGA_SMASH_MAP[block.id] then
+			block:remove(true)
+		else
+			SFX.play(3)
+			block:hit()
+		end
+
+		didSomething = true
+	end
+
+	if didSomething then
+		npc:kill(HARM_TYPE_OFFSCREEN)
+	end
+end
+
+function guns.onDrawBullet(npc)
+    local config = NPC.config[npc.id]
+	local img = Graphics.sprites.npc[npc.id].img
+
+    Graphics.drawBox {
+        texture = img,
+        x = npc.x,
+        y = npc.y,
+        width = img.width,
+        sourceX = 0,
+        sourceY = npc.animationFrame * config.gfxheight,
+        priority = config.priority,
+        sceneCoords = true,
+        rotation = npc.data.rotation * 180 / math.pi
+    }
+
+	npcutils.hideNPC(npc)
 end
 
 function guns.onTick()
@@ -331,6 +394,10 @@ function guns.onTick()
         gun.totalX = gun.pivotX + clampedX - gun.currentRecoilX * gun.direction
         gun.totalY = gun.pivotY + clampedY - gun.currentRecoilY
 
+        local shootAngle = gun.currentTotalRotation * math.pi / 180
+        gun.shootX = gun.totalX + gun.bulletOffsetX * math.cos(shootAngle) - gun.bulletOffsetY * -gun.direction * math.sin(shootAngle)
+        gun.shootY = gun.totalY + gun.bulletOffsetX * math.sin(shootAngle) + gun.bulletOffsetY * -gun.direction * math.cos(shootAngle)
+
         gun.currentFlash = math.max(0, gun.currentFlash * 0.5 - 1/65)
 
         if gun.currentReloadTime == 1 then
@@ -358,8 +425,7 @@ function guns.onTick()
     for _, bullet in pairs(guns.bullets) do
         if not bullet.fired then goto continue end
 
-        bullet.linger = bullet.linger - 1
-        if bullet.linger <= 0 then
+        if bullet.npc == nil or not bullet.npc.isValid then
             bullet:destroy()
         end
 
